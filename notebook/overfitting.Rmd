@@ -1,0 +1,93 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("rstan")) install.packages("rstan")
+if (!require("devtools")) install.packages("devtools")
+if (!require("rethinking")) devtools::install_github("rmcelreath/rethinking")
+```
+
+
+Loading packages
+```{r}
+library(tidyverse)
+library(rstan)
+library(rethinking)
+```
+
+### Notation and definitions
+Statistics in the Bayesian framework makes inferences by fitting a probability model to a set of data.
+The process of doing this involves (1) setting up a full probability model, (2) conditioning on observed data to calculate a *posterior distribution* and (3) evaluating the fit of the model and the resulting posterior to the data.
+
+We're interested in the quantity $p(\theta|y)$, namely what is the probability of our parameters $\theta$ given that we've collected our data $y$.
+Let $y = \left(y_1, y_2, \ldots, y_n\right)$ be a vector of data and $\theta = \left(\theta_1, \theta_2, \ldots, \theta_m\right)$ be a vector of parameters.
+By Bayes' theorem,
+$$
+\begin{align*}
+p(\theta|y) = \frac{p(y|\theta)p(\theta)}{p(y)}.
+\end{align*}
+$$
+$p(\theta)$ is the prior distribution for $\theta$ and is generally taken to be the prior information we have about parameters $\theta$ before obtaining any data, and $p(y|\theta)$ is the likelihood given by the probability model we specify for the data-generating process.
+
+Let $\tilde{y}$ be new data obtained after observing the data $y$.
+The posterior predictive distribution of $\tilde{y}$, obtaining by conditioning on the posterior based on $y$ is
+$$
+\begin{align*}
+p(\tilde{y}|y) = \int p(\tilde{y}|\theta) p(\theta | y) \, d\theta
+\end{align*}
+$$
+Derivation:
+$$
+\begin{align*}
+p(\tilde{y}|y)  &= \int p\left(\tilde{y}, \theta |y\right) \, d\theta\\
+                &= \int p\left(\tilde{y} | \theta , y\right)\, p\left(\theta|y\right) \, d\theta\\
+                &= \int p(\tilde{y}|\theta) p(\theta | y) \, d\theta
+\end{align*}
+$$
+The first line is given by the law of total probability.
+The second is uses the fact that $P(A, B) = P(B|A)P(A)$.
+The third line follows from the assumption that $y$ and $\tilde{y}$ are conditionally independent given $\theta$.
+
+### Assessing model fit
+We use the log predictive density to measure model fit, i.e.
+$$
+\begin{align*}
+\log p(y|\theta)
+\end{align*}
+$$
+Note that we are not using the log posterior.
+We are using the data model only and incorporating the prior into the assessment of model fit.
+The reasons for that is (1) we want to summarize the fit of the model to the data only and (2) the prior is already indirectly incorporated in this as it affects inferences about $\theta$.
+
+Now the question is how do we start to measure how ``good'' a model is based on its fit to the data.
+By good, we mean some vague mixture of the model explaining the data well (i.e. avoiding underfitting) while not learning too much the data as to reduce its predictive power (i.e. avoiding overfitting).
+The ideal measure for this is an out-of-sample predictive performance for new data that hasn't been observed yet.
+Let $f$ be the true data-generating model, $y$ be the observed data, and $\tilde{y}$ be future data from the same data-generating process.
+Then for a single new data point $\tilde{y}_i$, we are interested in
+$$
+\begin{align*}
+\log(\tilde{y} | y)
+\end{align*}
+$$
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
