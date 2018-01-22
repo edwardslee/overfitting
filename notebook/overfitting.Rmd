@@ -5,6 +5,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 if (!require("tidyverse")) install.packages("tidyverse")
 if (!require("rstan")) install.packages("rstan")
 if (!require("devtools")) install.packages("devtools")
@@ -36,9 +37,10 @@ $p(\theta)$ is the prior distribution for $\theta$ and is generally taken to be 
 Let $\tilde{y}$ be new data obtained after observing the data $y$.
 The posterior predictive distribution of $\tilde{y}$, obtaining by conditioning on the posterior based on $y$ is
 $$
-\begin{align*}
+\begin{align}
 p(\tilde{y}|y) = \int p(\tilde{y}|\theta) p(\theta | y) \, d\theta
-\end{align*}
+(\#eq:prediction)
+\end{align}
 $$
 Derivation:
 $$
@@ -70,24 +72,256 @@ Let $f$ be the true data-generating model, $y$ be the observed data, and $\tilde
 Then for a single new data point $\tilde{y}_i$, we are interested in
 $$
 \begin{align*}
-\log(\tilde{y} | y)
+\log p_\text{post}(\tilde{y}_i)
+\end{align*}
+$$
+which is the log predictive density for a new data point $\tilde{y}_i$ induced by the posterior distribution $p_\text{post}(\theta)$.
+Using equation \@ref(eq:prediction),
+$$
+\begin{align*}
+\log(\tilde{y} | y) &= \log p_\text{post}(\tilde{y}_i) \\
+                    &= \log \int p(\tilde{y}|\theta) p(\theta | y) \, d\theta \\
+                    &= \log \int p(\tilde{y}|\theta) p_\text{post}(\theta) \, d\theta
 \end{align*}
 $$
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+We can't stop here though because we don't actually know what the future $\tilde{y}_i$ data are, so we define an expected out-of-sample log predictive density for a new data point (**elpd**),
+$$
+\begin{align*}
+\text{elpd} &= \text{expected log predictive density for a new data point} \\
+            &= E_f\left(\log p_\text{post}(\tilde{y}_i)\right) \\
+            &= \int f(\tilde{y}_i) \log p_\text{post}(\tilde{y}_i) \, d\tilde{y}
+\end{align*}
+$$
+We don't know what the data distribution $f$ is, so our goal is to estimate the elpd by finding the in-sample predictive density and correcting it for overfitting.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+We extend this definition to a whole data set by adding up the elpd for each data point to obtain the **elppd**,
+$$
+\begin{align*}
+\text{elppd}  &= \text{expected log pointwise predictive density for a new dataset} \\
+              &= \sum_{i = 1}^{n} E_f \left(\log p_\text{post} (\tilde{y}_i) \right)
+\end{align*}
+$$
+Here, we are dividing up the data $y$ into a set of data points $y_i$.
+This can be kind of awkward for data that aren't independent, e.g. time series data or spatial data.
 
-```{r cars}
-summary(cars)
+Of course, we don't have an unlimited source of new data $\tilde{y}_i$ to calculate a out-of-sample predictive density, so we're stuck with calculating the in-sample predictive density and then correcting it to estimate the elppd.
+Given that we have a posterior distribution $p_\text{post}(\theta) = p(\theta|y)$, the predictive accuracy of the fitted model to data is given by
+$$
+\begin{align*}
+\text{lppd}   &= \text{log pointwise predictive density} \\
+              &= \log \Pi_{i = 1}^{n} p_\text{post}(\tilde{y}_i) \\
+              &= \sum_{i = 1}^{n} \log\int p(y_i|\theta)p_\text{post}(\theta) \, d\theta
+\end{align*}
+$$
+And with some sort of MCMC samplter, we estimate that integral with simulations.
+So, let our posterior stimulations be $M$ draws from $p_\text{post}(\theta)$ labeled $\theta^s$, $s = 1, \ldots, M$.
+Then the computed lppd is
+$$
+\begin{align*}
+\text{computed lppd}  &= \text{computed log pointwise predictive density} \\
+                      &= \sum_{i = 1}^{n} \log\left(\frac{1}{S} \sum_{s = 1}^{M} p(y_i | \theta^s)\right)
+\end{align*}
+$$
+
+### Information criteria and cross-validation
+The computed lppd is always too optimistic about out-of-sample predictive accuracy so we need to correct it to get an estimate of the elppd.
+This is normally done by substracting a correction for the number of parameters or the effective number of parameters in the model.
+Conceptually, the effect number of parameters is a reflection of how "flexible" the model is, and a "flexible" model is more prone to overfit the observed data and reduce its ability to predict future data.
+
+The classic non-Bayesian way to do this correction is to simply count the number of parameters in the model.
+This approach, encapsulated in the Akaike information criterion (AIC), uses the maximum-likelihood estimate for $\theta$ to calculate the lppd and then subtracts the number of parameters $k$,
+$$
+\begin{align*}
+\hat{\text{elpd}}_\text{AIC} = \log p(y | \hat{\theta}_\text{MLE}) - k
+\end{align*}
+$$
+We obtain the classic formula for AIC by multiplying by -2, obtaining $AIC = -2\log p(y | \hat{\theta}_\text{MLE})  + 2k$.
+And note that the first term in the AIC formula is simple the deviance of the model for the MLE parameters (as defined in Mcelreath's book).
+AIC is limited in two ways:
+
+  1. It uses the MLE estimate for $\theta$ rather than incorporating uncertainty about $\theta$. We would prefer to use the whole posterior distribution in calculating the lppd
+  2. It simply uses the number of parameters $k$, which assumes flat priors. Once we start using informative priors and hierarchical models, our models will tend not to overfit as much.
+  
+WAIC is the fully Bayesian approach where
+$$
+\begin{align*}
+\hat{\text{elppd}}_\text{WAIC} = \text{lppd} - p_\text{WAIC}
+\end{align*}
+$$
+The $p_\text{WAIC}$ is the effective number of parameters term and is given by
+$$
+\begin{align*}
+p_\text{WAIC} = \sum_{i = 1}^n \text{var}_\text{post} \left(\log p(y_i|\theta) \right)
+\end{align*}
+$$
+This equation calculates the variance in the log predictive density for each data point over the whole posterior and then sums them all up.
+
+### CODEEEE
+Let's simulate a data for a simple linear regression and see how WAIC changes with different models
+```{r}
+# parameters for the data-generating model
+beta <- 3      # slope
+alpha <- 5     # intercept
+std_dev <- 15  # noise
+
+# parameters for unrelated data
+what1 <- .2   
+what2 <- 1
+
+x_data <- rep(1:50, each = 5)
+y_data <- beta * x_data + alpha + rnorm(length(x_data), 0, std_dev)
+z_data <- beta * sin(x_data/7000) + rnorm(length(x_data), 0, std_dev)
+dat <- data.frame(x = x_data, y = y_data, z = z_data) # tibbles don't work with rethinking
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+egg::ggarrange(ggplot(dat) + geom_point(aes(x, y)),
+               ggplot(dat) + geom_point(aes(x, z)))
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Let's run six different models:
+
+1. m1: $y = b_1 x + a$
+2. m2: $y = b_1 x + b_2 x^2 + a$
+3. m3: $y = b2 x^2 + a$
+4. m4: $y = b_1 x + b_3 z + a$
+5. m5: $y = a$
+6. m6: $y = b_1 x + b_2 x ^ 2 + b_3 x ^ 3 + b_4 x^ 4 + a$
+
+```{r echo = FALSE}
+m1 <- map2stan(
+  alist(
+    y ~ dnorm(mu, sigma),
+    mu <- b1 * x + a,
+    b1 ~ dnorm(0, 2),
+    a ~ dnorm(0, 5),
+    sigma ~ dcauchy(0, 1)
+  ),
+  data = dat
+)
+
+m2 <- map2stan(
+  alist(
+    y ~ dnorm(mu, sigma),
+    mu <- b1 * x + b2 * x ^ 2 + a,
+    b1 ~ dnorm(0, 2),
+    b2 ~ dnorm(0, 2),
+    a ~ dnorm(0, 5),
+    sigma ~ dcauchy(0, 1)
+  ),
+  data = dat
+)
+
+m3 <- map2stan(
+  alist(
+    y ~ dnorm(mu, sigma),
+    mu <- b2 * x ^ 2 + a,
+    b2 ~ dnorm(0, 2),
+    a ~ dnorm(0, 5),
+    sigma ~ dcauchy(0, 1)
+  ),
+  data = dat
+)
+
+m4 <- map2stan(
+  alist(
+    y ~ dnorm(mu, sigma),
+    mu <- b1 * x + b3 * z + a,
+    b1 ~ dnorm(0, 2),
+    b3 ~ dnorm(0, 2),
+    a ~ dnorm(0, 5),
+    sigma ~ dcauchy(0, 1)
+  ),
+  data = dat
+)
+
+m5 <- map2stan(
+  alist(
+    y ~ dnorm(mu, sigma),
+    mu <- a,
+    a ~ dnorm(0, 5),
+    sigma ~ dcauchy(0, 1)
+  ),
+  data = dat
+)
+
+m6 <- map2stan(
+  alist(
+    y ~ dnorm(mu, sigma),
+    mu <- b1 * x + b2 * x ^ 2 + b3 * x ^ 3 + 
+      b4 * x ^ 4 +  a,
+    a ~ dnorm(0, 5),
+    b1 ~ dnorm(0, 5),
+    b2 ~ dnorm(0, 5),
+    b3 ~ dnorm(0, 5),
+    b4 ~ dnorm(0, 5),
+    sigma ~ dcauchy(0, 1)
+  ),
+  data = dat
+)
+```
+
+Plotting the fits
+```{r}
+par(mfrow = c(3, 2))
+mu <- link(m1)
+mu_mean <- apply(mu, 2, mean)
+mu_pi   <- apply(mu, 2, HPDI, prob = .89)
+plot(y ~ x, data = dat, main = "m1")
+lines(dat$x, mu_mean)
+shade(mu_pi, dat$x)
+
+mu <- link(m2)
+mu_mean <- apply(mu, 2, mean)
+mu_pi   <- apply(mu, 2, HPDI, prob = .89)
+plot(y ~ x, data = dat, main = "m2")
+lines(dat$x, mu_mean)
+shade(mu_pi, dat$x)
+
+mu <- link(m3)
+mu_mean <- apply(mu, 2, mean)
+mu_pi   <- apply(mu, 2, HPDI, prob = .89)
+plot(y ~ x, data = dat, main = "m3")
+lines(dat$x, mu_mean)
+shade(mu_pi, dat$x)
+
+mu <- link(m4)
+mu_mean <- apply(mu, 2, mean)
+mu_pi   <- apply(mu, 2, HPDI, prob = .89)
+plot(y ~ x, data = dat, main = "m4")
+lines(dat$x, mu_mean)
+shade(mu_pi, dat$x)
+
+mu <- link(m5)
+mu_mean <- apply(mu, 2, mean)
+mu_pi   <- apply(mu, 2, HPDI, prob = .89)
+plot(y ~ x, data = dat, main = "m5")
+lines(dat$x, mu_mean)
+shade(mu_pi, dat$x)
+
+mu <- link(m6)
+mu_mean <- apply(mu, 2, mean)
+mu_pi   <- apply(mu, 2, HPDI, prob = .89)
+plot(y ~ x, data = dat, main = "m6")
+lines(dat$x, mu_mean)
+shade(mu_pi, dat$x)
+
+par(mfrow = c(1, 1))
+```
+
+```{r}
+comp_ic <- compare(m1, m2, m3, m4, m5, m6)
+df <- comp_ic@output %>% mutate(lppd = (WAIC - 2 * pWAIC) / -2)
+comp_ic
+```
+
+
+
+
+
+
+
+
